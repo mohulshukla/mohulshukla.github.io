@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Project 1</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        img {
+            width: 100%;
+            height: auto;
+            display: block;
+        }
+        .row {
+            display: flex;
+            gap: 12px;
+        }
+        .row figure {
+            flex: 1;
+            min-width: 0;
+            margin: 0;
+        }
+        .grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .grid figure {
+            flex: 1 1 30%;
+            min-width: 220px;
+            margin: 0 0 16px 0;
+        }
+        code {
+            font-size: 0.95em;
+        }
+    </style>
+</head>
+<body>
+    <p><a href="../index.html">Home</a></p>
+    <h1>Project 1: Colorizing the Prokudin-Gorskii Collection</h1>
+
+    <h2>Background</h2>
+    <p>
+        Sergei Mikhailovich Prokudin-Gorskii photographed the Russian Empire in the early 1900s by taking three
+        exposures of the same scene through blue, green, and red filters on a single glass plate. The Library of
+        Congress later digitized those plates as tall grayscale images: the top third is blue, the middle is green,
+        and the bottom is red. This project automatically extracts those three channels, aligns green and red to
+        blue, and stacks them into an RGB photograph.
+    </p>
+
+    <h2>Approach</h2>
+    <p>
+        To start I split each plate into B, G, and R by height. Before splitting, I cropped 10% off the left and right of the
+        full scan (those borders are shared). After splitting, I crop 10% off the top and bottom of each channel
+        (each exposure has its own edge artifacts). The alignment is a search over translations
+        <code>(dy, dx)</code>, where <code>dy</code> is a vertical shift (rows) and <code>dx</code> is a horizontal
+        shift (columns). Each candidate shift is applied with <code>np.roll</code>. After shifting, I crop a thin
+        interior of size <code>max_shift + 2</code> before scoring so wrap-around pixels from <code>np.roll</code>
+        do not dominate the metric. The pre-crop removes the original plate borders, and the per-shift crop only
+        handles invalid pixels created by rolling.
+    </p>
+    <p>
+        The matching score I used is Normalized Cross-Correlation (NCC). I followed the spec for its implementation, wherein both patches are converted to float, mean-subtracted,
+        then scored as a normalized dot product. I used NCC instead of L2 because the three
+        filter exposures are not the same brightness, so a raw pixel difference can prefer a bad shift. Mean-subtracting
+        and normalizing makes the score care about structure more than overall intensity.
+    </p>
+    <p>
+        For the small JPEGs, a single-scale search over about ±15 pixels is enough. For the large TIFFs, displacements
+        can be much larger and thus be time-intensive, so I use a recursive image pyramid: downsample by 2, estimate the shift on the smaller
+        image, multiply that shift by 2, then refine locally (±2 pixels) at the current resolution. When the image is
+        already small (<code>min(h, w) &lt; 300</code>), the pyramid falls back to the single-scale search.
+    </p>
+
+    <h2>Single-scale results (JPEGs)</h2>
+    <p>
+        These three low-resolution plates were aligned with the same NCC search (the pyramid hits the single-scale
+        base case on these sizes).
+    </p>
+    <div class="row">
+        <figure>
+            <img src="./media/cathedral.jpg" alt="Aligned cathedral">
+            <figcaption>cathedral — G (5, 2), R (12, 3)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/monastery.jpg" alt="Aligned monastery">
+            <figcaption>monastery — G (−3, 2), R (3, 2)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/tobolsk.jpg" alt="Aligned tobolsk">
+            <figcaption>tobolsk — G (3, 3), R (6, 3)</figcaption>
+        </figure>
+    </div>
+
+    <h2>Multi-scale pyramid results (TIFFs)</h2>
+    <p>
+        Captions list <code>(dy, dx)</code> for green→blue and red→blue.
+    </p>
+    <div class="grid">
+        <figure>
+            <img src="./media/church.jpg" alt="Aligned church">
+            <figcaption>church — G (25, 4), R (58, −4)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/emir.jpg" alt="Aligned emir">
+            <figcaption>emir — G (49, 24), R (75, 42)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/harvesters.jpg" alt="Aligned harvesters">
+            <figcaption>harvesters — G (59, 16), R (123, 13)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/icon.jpg" alt="Aligned icon">
+            <figcaption>icon — G (41, 17), R (89, 23)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/ilemselga.jpg" alt="Aligned ilemselga">
+            <figcaption>ilemselga — G (40, 7), R (130, 11)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/melons.jpg" alt="Aligned melons">
+            <figcaption>melons — G (81, 10), R (178, 13)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/religous_painting.jpg" alt="Aligned religious painting">
+            <figcaption>religous_painting — G (27, 3), R (68, 7)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/self_portrait.jpg" alt="Aligned self portrait">
+            <figcaption>self_portrait — G (78, 29), R (176, 37)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/siren.jpg" alt="Aligned siren">
+            <figcaption>siren — G (49, −6), R (95, −25)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/three_generations.jpg" alt="Aligned three generations">
+            <figcaption>three_generations — G (53, 14), R (112, 11)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/wharf.jpg" alt="Aligned wharf">
+            <figcaption>wharf — G (15, −7), R (82, −16)</figcaption>
+        </figure>
+    </div>
+
+    <p>
+        The <b>emir</b> portrait still looks slightly off. I suspect this is because the three channels do not have similar brightness, so NCC on
+        raw intensities can lock onto a false peak (with a 5% pre-crop, red went to
+        <code>(94, −210)</code>). With a 10% pre-crop the red shift became <code>(75, 42)</code>, which is much
+        more plausible, and the portrait is largely aligned. Although as can be seen some color fringing still remains.
+    </p>
+
+    <h2>Images of my choosing</h2>
+    <p>
+        Three additional plates from the
+        <a href="https://www.loc.gov/collections/prokudin-gorskii/">Prokudin-Gorskii collection</a>,
+        aligned with the same pyramid + NCC pipeline. I picked a family in traditional dress inside a carpeted tent
+        (prok-00090), a thatched house by a river (prok-00166), and a boy sitting on a canal wall (prok-00220) as I found these images to be aesthetically pleasing and diverse. The same algorithm as it turns our worked well first-try on these images!
+    </p>
+    <div class="row">
+        <figure>
+            <img src="./media/master-pnp-prok-00000-00090a.jpg" alt="Aligned LoC plate 00090">
+            <figcaption>prok-00090 — G (44, −11), R (82, −39)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/master-pnp-prok-00100-00166a.jpg" alt="Aligned LoC plate 00166">
+            <figcaption>prok-00166 — G (26, 18), R (121, 35)</figcaption>
+        </figure>
+        <figure>
+            <img src="./media/master-pnp-prok-00200-00220a.jpg" alt="Aligned LoC plate 00220">
+            <figcaption>prok-00220 — G (40, −13), R (102, −10)</figcaption>
+        </figure>
+    </div>
+</body>
+</html>
