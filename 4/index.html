@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Project 4A</title>
+    <title>Project 4</title>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -82,11 +82,18 @@
 </head>
 <body>
     <p><a href="../index.html">Home</a></p>
-    <h1>Project 4A: Image Warping and Mosaicing</h1>
-
+    <h1>Project 4: Image Warping, Mosaicing and Autostitching</h1>
+    <p>
+        <a href="#part-a">Part A: Image Warping and Mosaicing</a>
+        &nbsp;&middot;&nbsp;
+        <a href="#part-b">Part B: Feature Matching for Autostitching</a>
+    </p>
     <p>
         All photos were shot on an iPhone at 5712 x 4284 and resized to 1200 x 1600 for processing.
     </p>
+
+    <hr>
+    <h1 id="part-a">Part A: Image Warping and Mosaicing</h1>
 
     <hr>
     <h1>A.1 Shoot the Pictures</h1>
@@ -432,6 +439,129 @@
         the exposure difference between frames turns into a visible step there. On the right the
         weights ramp, so the same difference is spread across the whole overlap and reads as a gentle
         gradient instead of an edge.
+    </p>
+
+    <hr>
+    <h1 id="part-b">Part B: Feature Matching for Autostitching</h1>
+    <p>
+        Part A needed me to supply the point correspondences. Part B finds them on its own,
+        following Brown et al., <em>Multi-Image Matching using Multi-Scale Oriented Patches</em>,
+        at a single scale. Corner detection, ANMS, descriptors, matching and RANSAC are all
+        written from scratch. scipy is used only for Gaussian filtering.
+    </p>
+
+    <h2>B.1 Harris corners and ANMS</h2>
+    <p>
+        Harris looks for pixels where the image changes in two directions at once, so moving the
+        window any way makes it look different. I use the corner response from the paper,
+        \(\det(M)/\operatorname{tr}(M)\), rather than the usual \(\det(M) - k\operatorname{tr}(M)^2\),
+        because it needs no arbitrary \(k\).
+    </p>
+    <p>
+        Raw Harris output is unusable on its own. It finds thousands of corners and they pile up
+        wherever contrast is highest, which on these photos means the glass balustrade and the lit
+        doorway, while whole regions get nothing. ANMS fixes the distribution. For each corner it
+        asks how far away the nearest meaningfully stronger corner is, then keeps the 500 points
+        with the largest such radius. A strong corner surrounded by stronger ones scores badly,
+        while a modest corner alone in a quiet region scores well.
+    </p>
+    <figure class="wide">
+        <img src="./media/b_corners_IMG_6709.jpg" alt="Harris corners before and after ANMS">
+        <figcaption>1729 Harris corners, then the 500 kept by ANMS. The clumps on the glass and the doorway thin out while the ceiling and floor gain points.</figcaption>
+    </figure>
+    <figure class="wide">
+        <img src="./media/b_corners_IMG_6701.jpg" alt="Harris corners before and after ANMS on the entrance photo">
+        <figcaption>The same on the entrance photo, 4343 corners down to 500.</figcaption>
+    </figure>
+
+    <h2>B.2 Feature descriptors</h2>
+    <p>
+        Each corner gets a 40 x 40 window, blurred and then sampled down to 8 x 8. The blur is the
+        important part. It makes the descriptor tolerant of being a pixel or two off, where
+        sampling 8 x 8 straight from raw pixels would alias badly. Each patch is then bias and gain
+        normalised, meaning subtract the mean and divide by the standard deviation, so a patch is
+        described by its shape rather than how bright that frame happened to be.
+    </p>
+    <figure><img src="./media/b_descriptors_IMG_6709.jpg" alt="Sixteen normalised 8x8 descriptors"><figcaption>Sixteen descriptors, each an 8 x 8 patch shown enlarged.</figcaption></figure>
+    <figure class="wide"><img src="./media/b_descriptor_sites_IMG_6709.jpg" alt="Where those descriptors were taken from"><figcaption>Where those sixteen came from.</figcaption></figure>
+
+    <h2>B.3 Matching</h2>
+    <p>
+        Every descriptor in the first image is compared to every descriptor in the second by sum of
+        squared differences, and I keep a match only if the best candidate is clearly better than
+        the second best. That is Lowe's ratio test. A patch that matches two different places
+        almost equally well is telling you it cannot distinguish them, and keeping it would feed
+        noise into the next stage. I threshold the ratio at 0.6.
+    </p>
+
+    <h3>Why the descriptors are rotated</h3>
+    <p>
+        Axis-aligned patches assume the camera was not rolled between frames. Mine were, a lot.
+        Fitting a rotation to the Part A homographies shows how much.
+    </p>
+    <table>
+        <tr><th>Pair</th><th>Roll</th><th>Matches, axis-aligned</th></tr>
+        <tr><td>Zellerbach facade</td><td>-26.8&deg;</td><td>5</td></tr>
+        <tr><td>Zellerbach entrance</td><td>-27.3&deg;</td><td>4</td></tr>
+        <tr><td>Atrium</td><td>+19.0&deg;</td><td>9</td></tr>
+        <tr><td>(a flat pair, for contrast)</td><td>+5.2&deg;</td><td>333</td></tr>
+    </table>
+    <p>
+        The last row is the diagnosis. With almost no roll the pipeline finds 333 matches. On my
+        three pairs almost nothing survives the ratio test, because a descriptor cannot recognise
+        a patch that has been turned. Four matches is not enough to fit anything.
+    </p>
+    <p>
+        So at each corner I take the gradient, blurred heavily so the direction reflects local
+        structure rather than one noisy pixel, and use its angle to turn the 40 x 40 sampling grid
+        before downsampling. Turning the grid lands on fractional coordinates, so this reuses the
+        bilinear sampler from Part A. That took the facade pair from 5 matches to 150 inliers, and
+        every figure below uses the rotated descriptors.
+    </p>
+    <figure class="wide"><img src="./media/b_matches_facade.jpg" alt="Matched features on the facade pair"><figcaption>Zellerbach facade, 181 matches of which 150 survive RANSAC. Grey lines are rejected matches.</figcaption></figure>
+    <figure class="wide"><img src="./media/b_matches_entrance.jpg" alt="Matched features on the entrance pair"><figcaption>Zellerbach entrance, 193 matches and 69 inliers.</figcaption></figure>
+    <figure class="wide"><img src="./media/b_matches_atrium.jpg" alt="Matched features on the atrium pair"><figcaption>Atrium, 281 matches and 201 inliers.</figcaption></figure>
+
+    <h2>B.4 RANSAC and automatic mosaics</h2>
+    <p>
+        The ratio test removes ambiguous matches but not confidently wrong ones, and least squares
+        has no defence against those. A single bad pair pulls the whole fit. RANSAC sidesteps this
+        by not trusting any individual match. It repeatedly picks 4 matches at random, fits an
+        exact homography to them, and counts how many of the remaining matches that homography
+        explains to within 2 pixels. After 2000 tries it keeps the largest agreeing set and refits
+        on all of it. A wrong match can only win if three other wrong matches happen to agree with
+        it, which does not happen.
+    </p>
+    <p>
+        The surviving homography goes into the same warping and feathered blending code from Part
+        A, unchanged.
+    </p>
+
+    <h3>Manual against automatic, side by side</h3>
+    <p>
+        For the manual half I clicked the correspondences myself, 8 per pair, in a small tool that
+        shows the two photos side by side and records a point each time I click the same feature in
+        both. Those points go straight into the same <code>computeH</code> from Part A, so nothing
+        in the left column below touches a detector.
+    </p>
+    <div class="pair">
+        <figure><img src="./media/mosaic_zellerbach_facade_manual.jpg" alt="Facade mosaic from hand-clicked correspondences"><figcaption>Clicked by hand, 8 points</figcaption></figure>
+        <figure><img src="./media/mosaic_zellerbach_facade_auto.jpg" alt="Facade mosaic from automatic correspondences"><figcaption>Automatic</figcaption></figure>
+    </div>
+    <div class="pair">
+        <figure><img src="./media/mosaic_zellerbach_entrance_manual.jpg" alt="Entrance mosaic from hand-clicked correspondences"><figcaption>Clicked by hand, 8 points</figcaption></figure>
+        <figure><img src="./media/mosaic_zellerbach_entrance_auto.jpg" alt="Entrance mosaic from automatic correspondences"><figcaption>Automatic</figcaption></figure>
+    </div>
+    <div class="pair">
+        <figure><img src="./media/mosaic_atrium_manual.jpg" alt="Atrium mosaic from hand-clicked correspondences"><figcaption>Clicked by hand, 8 points</figcaption></figure>
+        <figure><img src="./media/mosaic_atrium_auto.jpg" alt="Atrium mosaic from automatic correspondences"><figcaption>Automatic</figcaption></figure>
+    </div>
+    <p>
+        The two are nearly indistinguishable. Pushing the four image corners through both
+        homographies puts them 18.9, 33.4 and 17.0 pixels apart for the facade, entrance and
+        atrium. That is mostly a measure of my clicking rather than of the pipeline, since my own 8
+        points only fit their own homography to between 2 and 6 pixels and the corners sit well
+        outside the area I was clicking in.
     </p>
 </body>
 </html>
